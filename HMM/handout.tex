@@ -1,0 +1,631 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,
+    urlcolor=blue,
+}
+\usepackage{fullpage}
+
+\title{CSCI1410 Fall 2020 \\
+Assignment 3: Hidden Markov Models}
+
+\date{Code Due Monday, November 2 at 11:59pm ET \\ [1ex]
+Writeup Due Tuesday, November 3 at 11:59pm ET}
+
+
+\begin{document}
+
+\maketitle
+
+
+\section{Goals}
+
+In this assignment, you will use the forward algorithm t
+\textbf{filter} data in a hidden Markov model (HMM).  To filter data
+in an HMM is to predict the hidden state from those noisy data.  We
+provide a filtering library that runs on toy HMMs; your job will be to
+run it on a richer HMM that you build yourself.  Specifically, the HMM
+that you will build in this assignment is intended to solve the
+\textbf{localization} problem, where the goal is to infer a location
+(the hidden state) from noisy sensor data (observations).
+
+
+\section{Silly Premise}
+
+George just bought the new iOS Atari game pack! Problem is, he spilled
+some of his favorite beverage, Dr.\ Pepper, soaking his entire desk
+including all his papers and his smartphone.  He wants to play the
+game, but his phone's touchscreen is acting wonky.  Your job is to
+help George filter his touchscreen data using hidden Markov models
+(HMMs) so that he can control the little Atari dude with his finger.
+Specifically, you will build an HMM, and then run filtering to
+predict the location of his finger, given noisy observations.
+
+
+\section{Hidden Markov Models}
+
+A \textbf{hidden Markov model} comprises a set of states and observations together with
+an initial probability distribution over those states,
+a transition model, which describes the probability of transitioning from one state to another,
+and a sensor model, which describes the probabilities of the various observations at the various states.
+%
+The word ``hidden'' in the name describes the fact that the true state is hidden,
+and only noisy sensor data are observed.
+The model is Markov, because the transition model is assumed to satisfy the Markov property, namely:
+The future is independent of the past, given the present: i.e.,
+\begin{equation}
+  \Pr(X_{t + 1} | X_{t}, X_{t - 1}, \ldots X_{1}) = \Pr(X_{t + 1} | X_t) \enspace .
+  \label{eq:markov}
+\end{equation}
+Furthermore, the sensor model is assumed to satisfy the following conditional independence assumption:
+The present observation is independent of past states and observations, given the present state.
+\begin{equation}
+  \Pr(E_{t} | X_{t}, X_{t - 1}, \ldots, X_{1}, E_{t - 1}, E_{t - 2}, \ldots, E_{1}) = \Pr(E_{t} | X_{t}) \enspace .
+  \label{eq:ci}
+\end{equation}
+(Following the notation in the textbook, $X_t$ is a random variable describing the state at time $t$,
+and $E_t$ is a random variable describing the evidence observed at time $t$.)
+
+
+\section{Part 1: Filter (Read Only)}
+
+Your goal in past (and perhaps, future) versions of the first part
+of this assignment was to implement the forward algorithm to filter
+data in a toy localization problem (i.e., in a toy HMM).
+This year, your only goal is to be sure you understand the forward
+algorithm, as understanding it will be essential to successful
+completion of the second part of this assignment.
+
+
+\subsection{Algorithm}
+
+To filter data in an HMM is to predict the true (hidden) state, given noisy observations.
+Filtering can be accomplished using the \textbf{forward algorithm},
+which is a dynamic program captured by the following recurrence relation:
+for all $t \ge 0$,
+\begin{equation}
+  \Pr(X_{t + 1} | E_{1}, E_{2}, \ldots, E_{t + 1}) =
+  \alpha \Pr(E_{t + 1} | X_{t + 1}) \sum_{x_t} \Pr(X_{t + 1} | X_t = x_t) \Pr(X_t | E_1, E_2, \ldots, E_t)
+\end{equation}
+%(The base case is given by the HMM's initial probability distribution.)
+This recurrence relation follows directly from the HMM assumptions
+described by Equations~\ref{eq:markov} and~\ref{eq:ci}.
+A derivation appears in Section 15.2.1 of the textbook.
+
+
+\subsection{Data Structure}
+
+In a localization problem, states are locations.
+A natural way to represent locations is on a plane, say the Cartesian plane, using two dimensions, $x$ and $y$.
+A natural way to represent locations in a computer is to discretize a plane into a grid.
+Such a grid can be coded as a matrix, indexed by rows and columns.
+We call such a grid a \textbf{frame}, and code it in Python using a two-dimensional \verb|numpy| array.
+Here is an example of a frame, showing the object of interest
+to be located towards the bottom right of a 4x4 grid:
+\[
+\begin{bmatrix}
+0 & 0 & 0 & 0 \\
+0 & 0 & 0 & 0 \\
+0 & 0 & 0 & 1 \\
+0 & 0 & 0 & 0 \\
+\end{bmatrix}
+\]
+
+While this frame representation may be inefficient to represent locations that are known with certainty
+(since they involve only one 1 in a sea of 0s), it is less inefficient when the location is uncertain.
+In particular, we can also use a frame to represent a probability distribution over locations in a 4x4 grid,
+as follows:
+\[
+\begin{bmatrix}
+0 & 0 & 0 & 0 \\
+0 & 0 & 0.1 & 0.2 \\
+0 & 0 & 0.1 & 0.5 \\
+0 & 0 & 0 & 0.1 \\
+\end{bmatrix}
+\]
+
+Observations in a localization problem are measurements taken at the
+various locations, so they are the output of the sensor model.  In
+this assignment, observations are locations, so they are also
+represented as frames.  They are certain locations (i.e., as in the
+first example, not the second); however, they are not always correct.
+For example, at the location above, the sensor model might report a
+nearby location, such as:
+\[
+\begin{bmatrix}
+0 & 0 & 0 & 0 \\
+0 & 0 & 0 & 1 \\
+0 & 0 & 0 & 0 \\
+0 & 0 & 0 & 0 \\
+\end{bmatrix}
+\]
+
+\if 0
+When localizing on a grid, a typical sensor model might take four readings,
+corresponding to the four cardinal directions,
+indicating whether or not a barrier exists in each one.
+Suppose the error rate of these four sensors is $\epsilon$ (e.g., 5\%).
+Then, in a location where there are two barriers, to the west and the north, say,
+the probability of observing three (independent) sensor errors
+(e.g., barriers to the north, south, and east) is:
+$(1 - \epsilon)^1 (\epsilon)^3$.
+\fi
+
+
+%\subsection{Your Job}
+\subsection{Library}
+\label{sec:library}
+
+We are providing you with a filtering library which you can use to
+filter noisy finger tracking data in part two of this assignment.  The
+most important function in this library is (drum roll!) \verb|filter|.
+This filter function works on a ``generic'' HMM, in which states are
+specified as integers ($1, \ldots, n$), and so are observations ($1,
+\ldots, m$).  Given such an HMM (i.e., an initial probability
+distribution, a transition model, and a sensor model), together with a
+sequence of observations, \verb|filter| returns a probability
+distribution over states.
+
+As this filter function is generic, to use it to solve a specific
+problem (such as localization), you will need to encode the states in
+your problem as integers.  After doing so, you will likewise encode
+the three probability distributions that specify an HMM; then, after
+running filter, you will have to decode the result (back from integers
+to states).  The library also provides example \verb|encode| and
+\verb|decode| functions, which transform frames into integers and back
+again.  Note, however, that when you build your HMM in part two of
+this assignment, you are free to choose your state representation; you
+need not encode a single state as a single frame.
+
+\if 0
+% no longer needed, as these tips are all demonstrated in the library
+\paragraph{Coding Tips}
+Here are some tips for working with frames in Python:
+
+\begin{itemize}
+\item It might feel a bit strange to represent a distribution in a 2D array.
+%, and it can be difficult transitioning between them.
+Luckily, \verb|numpy| has a library that makes it easy to convert things into 2D arrays:
+\url{https://docs.scipy.org/doc/numpy-1.13.0/reference/generated/numpy.reshape.html}
+
+\item To quickly interpret locations, consider using \texttt{numpy.nonzero()}.
+\end{itemize}
+\fi
+
+
+\section{Part 2: Finger Tracking}
+
+In the first part of the assignment, you
+%wrote
+studied filtering, as an approach to solving the localization problem.
+In the second part, you will use
+%your
+our filtering library to solve George's localization problem; that is, to
+track his finger on the touchscreen of his smartphone, from only noisy
+observations.%
+\footnote{since he spilled his Dr.\ Pepper on his desk}
+To do so will involve you building an HMM (i.e., transition and sensor
+models), and then letting
+%your
+our filtering algorithm do its job.
+
+
+\subsection{Domain Knowledge}
+To build an HMM, you must use domain knowledge.
+Here is what you know about the present domain:
+
+\begin{itemize}
+\item In a single timestep, George's finger will always either stay in
+  the same place or move to one of the 8 adjacent locations (including
+  diagonally adjacent locations) on the touchscreen.
+
+\item George's finger is likely to continue moving in the same
+  direction it moved in the last timestep than it is to move in any
+  other direction.  But when it does not, it moves in a uniformly
+  random direction.
+
+\item If George's finger is about to move off the edge of the
+  touchscreen, he pauses for one timestep.  Then, at the next
+  timestep, it is more likely to move in the opposite direction.
+\end{itemize}
+
+In addition to this high-level description of George's finger movements,
+we have provided a simulator of finger movements,%
+\footnote{not actually George's}
+with the following functionality:
+
+\begin{itemize}
+\item \textbf{Simulator}
+  The simulator simulates finger movements
+  and reports the noisy readings of the touchscreen.
+  These reports are often correct, but err occasionally.
+  
+  For example, a simulation of three finger readings on a 4x4 touchscreen might look like this:
+\[
+\begin{bmatrix}
+              \begin{bmatrix}
+                  0 & 0 & 0 & 0 \\
+                  0 & 1 & 0 & 0 \\
+                  0 & 0 & 0 & 0 \\
+                  0 & 0 & 0 & 0
+              \end{bmatrix}, &
+              \begin{bmatrix}
+                  0 & 0 & 0 & 0 \\
+                  0 & 0 & 1 & 0 \\
+                  0 & 0 & 0 & 0 \\
+                  0 & 0 & 0 & 0
+              \end{bmatrix}, &
+              \begin{bmatrix}
+                  0 & 0 & 0 & 0 \\
+                  0 & 0 & 0 & 0 \\
+                  0 & 0 & 1 & 0 \\
+                  0 & 0 & 0 & 0
+              \end{bmatrix}
+\end{bmatrix}
+\]
+
+\item \textbf{Visualizer}
+  The visualizer is debugging and testing aid.
+  It can either display the actual position of the finger, the noisy reading, or both simultaneously.
+          
+\item \textbf{Testing Manager}
+The testing manager contains a few handy features to help you debug and test your solution.
+For example, you can save simulations so that you can later test using the same data multiple times.
+Additionally, the actual path of the finger is provided.
+Indeed, building on the simulation visualizer,
+the testing manager can display your filtered probabilities alongside this path.
+\end{itemize}
+
+To get started, we recommend that you run the simulator a few times,
+and visualize those simulations.  You might look for patterns in the
+errors that the touchscreen makes.  How would you describe these
+errors?  How might you model these errors in your HMM?
+
+\textbf{N.B.} The simulator only runs on department machines (unfortunately).
+
+
+\subsection{Your Tasks}
+Your main task is to formulate George's predicament as an HMM,
+\texttt{touchscreenHMM}, in \texttt{touchscreen.py}.  In particular,
+you must code up: states, observations, an initial probability
+distribution over states, a transition model (probabilities from one
+state to another), and a sensor model (probabilities of seeing the
+various observations in the various states).
+%
+We have provided you with stencils for \texttt{prior\_model},
+\texttt{transition\_model}, and \texttt{sensor\_model}.  You may
+change them in any way you like (including their signatures).
+
+You are also required to write the \texttt{filter\_noisy\_data}
+function.  To assist you with writing this function, we have provided
+a filtering library (see Section~\ref{sec:library}).
+%
+Your task will be to filter a sequence of $m$ (at most, 50) observations.
+\textbf{Important:} Assuming a touchscreen of dimension 20x20,
+building your HMM should not take more than 60 seconds; likewise,
+filtering all $m$ observations should not take more than 60 seconds.
+
+
+\subsubsection*{Additional Notes}
+
+\begin{itemize}
+\item
+\textbf{Representation:} A state need not correspond to a single
+location: i.e., a single frame.  On the contrary, you may be able to
+trade off run time for accuracy by grouping adjacent location together
+into a ``mega-location.''  Concretely, a mega-location for the finger
+could be the four locations in the top-left corner of a frame.  There
+are conceivably other sensible state representations as well.
+
+\item
+\textbf{Filtering:}
+While filtering generally operates on a sequence of observations, the
+\texttt{filter\_noisy\_data} function expects only a single
+observation (frame).  Consequently, you should cache your dynamic
+programming (DP) table, and then whenever \texttt{filter\_noisy\_data}
+is called, you can assume as the prior your current posterior.  An
+example of this behavior is provided in the filtering library.
+
+\item
+\textbf{Robustness:} Note that the filtering algorithm relies on an
+application of Bayes' rule.  In particular, the probability of a state
+given an observation is calculated as the probability of the
+observation given the state, times the probability of the state,
+divided by the probability of the observation.  Consequently, the
+filtering algorithm divides by a quantity, which, if you are not
+careful, could be zero.
+
+There are (at least) two ways to make your code robust to this
+possible division by zero.  The first is to make sure that you
+observation model assigns some small positive probability to
+\emph{all\/} observations.
+
+The second is something you should do whenever you invoke the division
+operator: check for a potential division by zero error, and then throw
+and catch exceptions accordingly.  (We are just reiterating an obvious
+point here: No code you write should ever terminate ungracefully!)
+\end{itemize}
+
+
+\subsection{Simulator}
+\label{sec:sim}
+
+\begin{itemize}
+\item \texttt{simulator.so}
+
+  This file contains the finger simulator as a compiled module (meaning you cannot see the source code).%
+  \footnote{Since the simulator is a compiled module, it only runs on department machines.}  
+  In it is the class \texttt{touchscreenSimulator}.
+  To create an instance of a touchscreen simulator, use:
+  $$\texttt{touchscreenSimulator(width=20, height=20, frames=50)}$$
+  Here, \texttt{width} and \texttt{height} are the dimensions of the touchscreen,
+  and \texttt{frames} is the number of frames in the simulation.
+  The default, which we expect to use for grading, is a 20x20 touchscreen over 50 frames.
+        
+  After creating an instance of the simulator, you should call \texttt{sim.run\_simulation()} before anything else.
+  This will generate the data---a sequence of actual and noisy frames---for the simulation instance.
+  
+  Then, to access the noisy frames,
+  you can call \texttt{get\_frame()} on an instance of \texttt{touchscreenSimulator}.
+  (You can make function calls to this class as if it were a \texttt{.py} file.)
+  The \texttt{get\_frame()} function also increments and then returns the next timestep.
+
+  Additionally, by calling \texttt{get\_frame(actual\_position=True)},
+  you can access the actual position of the finger for testing purposes.
+  This call returns a tuple consisting of (\texttt{noisy\_frame}, \texttt{actual\_frame}).
+
+  To visualize a simulation, use:
+  $$\texttt{sim.visualize\_simulation(noisy=True, actual=True, frame\_length=.1)}$$
+  By changing the values of \texttt{noisy} and \texttt{actual},
+  you can plot the noisy data, finger's actual location, or both.
+  If you plot both, orange represents the actual location;
+  yellow, the noisy position; and purple, where they overlap.
+
+\item \texttt{run\_visual\_simulation.py}:
+  Contains a script that runs all the visualization code on a new simulation.
+  This is useful when you want to run a bunch of simulations just to observe their behavior.
+  You can call this function by running the following command in shell:
+  $$\texttt{python run\_visual\_simulation.py}$$
+  
+\item \texttt{run\_touchscreen\_tests.py}:
+  Contains a script with different examples of how to use the Testing Manager in \texttt{simulation\_testing\_manager.py}.
+  This is useful when saving simulations, and for visualizing your solution alongside the simulation.
+
+  The file also contains documentation about how to use the testing functions and the various flags.
+  It also contains examples.
+  You can run the samples tests by running the following command in shell:
+  $$\texttt{python run\_touchscreen\_tests.py}$$
+
+  The text files created by the testing manager are saved in the following format (see \texttt{simple\_test.txt}):
+\begin{align*}
+  &20\,\,\,20\,\,\,50 \\
+  &8\,\,\,10\,\,\,8\,\,\,9\\
+  &8\,\,\,10\,\,\,8\,\,\,10\\
+  &8\,\,\,11\,\,\,8\,\,\,11\\
+  &\,\,\,\,\,\,\,\,\,\,...
+\end{align*}
+        
+The first line contains three integers referring to width, height, and the number of frames of the simulation.
+Each subsequent line represents one frame.
+The four integers: \verb|noisy_x|, \verb|noisy_y|, \verb|actual_x|, \verb|actual_y|.
+For example, $8\,\,10\,\,8\,\,9$ denotes a noisy location of (8, 10) and an actual location of (8, 9).
+
+\item \texttt{noisy\_algorithm.so}
+  The \textit{top-secret\/} algorithm that we used to add noise to the actual position of the finger.
+  You will have to use the visualizer to try to get a handle on this function.
+  You should never have to call this function directly.
+
+\item \texttt{constants.py}
+  This file contains the constants we use to seed the noise model (i.e., our top-secret algorithm).
+  We will be testing your touchscreen with the given constants,
+  but feel free to experiment to see what changing them does!
+
+\item \texttt{generate\_data.py}
+  You may find it useful to generate statistics (or do other calculations)
+  comparing the noisy data to the actual finger locations. \textbf{(Hint Hint!)}
+
+  To make it easier for you to process the simulation data,
+  the function \texttt{create\_simulations(size, frames)}
+  returns a list of all the frames in a simulation.
+
+\item \texttt{visualizer.py}
+  Contains the visualizer for this project.
+  It automatically progress through the frames, using \texttt{matplotlib} to plot the \texttt{numpy} arrays.
+  You won't ever have to call this function directly.
+\end{itemize}
+    
+
+\section{Part 3: Written Questions}
+In addition to your code, you should also submit a PDF file in which you
+answer the following questions.
+%, one at a time.
+While not required, we recommend that you use \LaTeX{} to typeset your work.
+
+\begin{enumerate}
+\item How did you model George's predicament as an HMM?
+  Specifically:
+
+\begin{enumerate}  
+\item What did you choose as the hidden states and observations?
+  
+\item How did you decide upon transition and sensor models?
+  How did the observations generated by the simulator influence your choices?
+  Account for each choice that you made.
+
+\item What assumptions do you make in your approach? Do they hold in reality?
+  In particular, does your mental model of the problem violate either (or both) of the two key HMMs assumptions?
+
+\item What other approaches did you consider? Why did they seem promising at first? Why didn’t you end up using them?
+\end{enumerate}
+
+Be sure to describe your ideas clearly and completely.
+Doing so may easily take more than a page.
+
+\if 0
+\item Smoothing and Prediction Inference Tasks
+\begin{enumerate}
+  \item Explain (with examples, equations, etc.) what is smoothing in the context of HMMs. How would you modify your existing filtering code to implement smoothing over the touchscreen data? What should we expect as reasonable arguments and outputs for a function called touchscreen\_smoothing?
+
+  \item Explain (with examples, equations, etc.) what is prediction in the context of HMMs. How would you modify your existing filtering code to implement making predictions over the touchscreen data? What should we expect as reasonable arguments and outputs for a function called touchscreen\_prediction?
+\end{enumerate}
+\fi
+
+\end{enumerate}
+
+
+\section{Part 4: Ethics Questions}
+
+HMMs can be applied in many fields where the goal is to recover
+information that is not immediately observable.  One common
+application is in speech recognition assistants.  Read
+\href{https://www.theguardian.com/technology/2020/jan/11/why-do-we-gender-ai-voice-tech-firms-move-to-be-more-inclusive}{this
+  brief article}, and
+\href{https://hbr.org/2019/05/voice-recognition-still-has-significant-race-and-gender-biases}{this
+  one} as well, both about voice recognition assistants, and then
+answer the following questions.
+
+\begin{itemize}
+\item Surveys demonstrate that Americans have a preference for female
+  sounding voice assistants.  By defaulting to a feminine-sounding
+  voice for speech assistants, who is harmed?  Who benefits?
+  
+\item If you ask Alexa, the speech-assistant software in Amazon Echo
+  devices, if it’s a feminist, it will respond in the affirmative. ``I
+  am a feminist.  As is anyone who believes in bridging the inequality
+  between men and women in society,'' it continues.  In contrast,
+  previous Apple guidelines for Siri led it to disengage when given
+  such questions, ``My name is Siri, and I was designed by Apple in
+  California.  That’s all I’m prepared to say.''  What assumption does
+  each design make about the role of politics in technology and what
+  are the implications of each design?
+  
+\item
+  Research shows that current voice assistants suffer from both racial
+  and gender bias.  Current assistants are most accurate on male
+  voices, with significant discrepancies occurring for women and
+  racial minorities or immigrant communities that speak with regional
+  accents.  Acknowledging that supporting every dialect in a region
+  may be unfeasible, at what point should we deem it acceptable to
+  deploy a voice recognition assistant?
+\end{itemize}
+
+
+\section{Grading}
+This assignment is a modeling exercise.
+As such, there is no right answer.%
+\footnote{Well, that's not entirely true.  There is a simulator, and
+  it is driven by a stochastic process; so in principle it might be
+  possible to reverse engineer that process from examples, and earn a
+  perfect score.  But barring that possibility \ldots}
+So the question arises, how are we ever to grade you on this assignment?
+Related, and arguably even more important,
+how is anyone to tell if they have produced a good solution?
+Obvious answer: there must be some kind of scoring system.
+
+It turns out that an analog of this problem has been studied by forecasting experts for decades,
+dating back to the work of Brier, a meteorologist, in the 1950s.%
+\footnote{Here is a
+  \href{https://web.archive.org/web/20171023012737/https://docs.lib.noaa.gov/rescue/mwr/078/mwr-078-01-0001.pdf}{link}
+  to Brier's article in the January, 1950 issue of the Monthly Weather Review.}
+Brier was concerned that meteorologists did not always put all their efforts into producing the best forecast.
+%publishing their ``true'' forecasts.
+Why?
+Well, he observed that it was often easier for a meteorologist to predict
+how they would be \emph{scored\/} on a forecast than to try to predict the weather!
+
+And so, the theory of \href{https://en.wikipedia.org/wiki/Scoring_rule}{proper scoring rules} was born.
+A \textbf{proper scoring rule} is one for which you maximize your score by producing the best forecast you can.
+Consequently, all your efforts should go into just that: producing the best forecast you can.
+You cannot do better by reporting anything else.
+
+We will grade you on this assignment using a proper scoring rule;
+not Brier's original rule (the so-called Brier score), but an alternative:
+the \href{https://en.wikipedia.org/wiki/Scoring_rule#Spherical_scoring_rule}{spherical scoring rule}.
+So you can be sure that whenever you improve your HMM,
+meaning filtering produces more reliable predictions,
+your score can only increase.
+In particular, you should never find yourself in the uncomfortable situation
+where you believe you have improved your model,
+but your score has decreased.
+If this ever happens, by the theory of proper scoring rules, you can logically conclude that it is time to debug.
+That is the beauty of grading using a proper scoring rule!
+
+\if 0
+For this assignment only, we are releasing details of our grading
+scheme---namely our scoring rule.  Note that releasing these details
+is not inconsistent with our course policy.  In all other assignments,
+it is your job to think through the problems thoroughly.  It would be
+a crutch to give you access to our test cases.  As we are not running
+your code on any of our own test cases this time, we can safely tell
+you our scoring rule.  That way, you can test your code as you work to
+improve your model.
+\fi
+
+There is one final detail missing from this grading plan.  We have not
+yet told you how we plan to convert your spherical score, a number
+between 0 and 1, into a grade on this assignment.  If we simply
+multiply each of your scores by 100, we may end up with a distribution
+of grades with a mean of 60!  (Many of you may find that undesirable.)
+Another alternative is to first normalize your score, by dividing by
+the best of the TA's scores.  In that case, if your score is 0.7, and
+the best TA score is 0.6, your grade would be 117.  As this is the
+first year that we are using a proper scoring rule to score this
+assignment, we don't quite know yet what the range of spherical scores
+will be, or how we will convert your score into a grade.  But you
+should all feel free to post your scores on Piazza to give other
+students in the class an idea of what is possible.
+
+\textbf{Practicalities}: So that you can get an idea of how your model
+performs, we have provided for you the file \textbf{test\_model.py}.
+Executing this code on a department machine will run $n$ simulations
+over $m$ (likely, 50) observations, and report the average proper
+spherical score across the $n$ simulations, as well as the total time
+taken to both instantiate your model and filter the $m$ observations.
+We note once again that while it will inform your grade for this
+assignment, this average spherical score is \emph{not\/} your grade
+for this assignment.
+
+
+\section{Virtual Environment and Requirements}
+As usual, you should be using our virtual environment to run your code:
+\begin{itemize}
+\setlength\itemsep{0em}
+
+\item[] To activate: \texttt{\$ source /course/cs1410/venv/bin/activate}
+
+\item[] Then simply run your files: \texttt{\$ python <executable.py>}
+
+\item[] To deactivate: \texttt{\$ deactivate}
+\end{itemize}
+    
+Alternatively, if you choose to work on your own machine, you will
+need some additional packages for this project: \texttt{scipy},
+\texttt{matplotlib}, and \texttt{numpy}. These are already installed
+in our virtual environment, but you will need to install them on your
+own machine.
+    
+One quick way to install the dependencies you don't have is to use
+pip. If you haven't used pip before, you can find instructions here:
+\url{https://pip.pypa.io/en/stable/installing/}.
+
+
+\section{Install and Handin Instructions}
+To install, run \verb|cs1410_install HMM| in \verb|~/course/cs1410|.
+
+To hand in, run \verb|cs1410_handin HMM| in \verb|~/course/cs1410/HMM|,
+which should contain your \verb|hmm.py| and \verb|touchscreen.py|.
+
+In addition, please submit the written portion of the assignment via Gradescope.
+
+In accordance with the course \href{https://forms.gle/DqfbBY8jdaqenRoa9}{grading policy}, your
+written homework should not contain your name, Banner~ID, CS~login, or any other personally
+identifiable information.
+
+\end{document}
+
+    
+\end{document}

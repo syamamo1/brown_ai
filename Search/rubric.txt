@@ -1,0 +1,28 @@
+Autograded [120]
+----dfs [20]
+--------produces correct solution paths              [10]
+--------states are expanded in a depth-first order   [10]
+----ids [20]
+--------produces correct solution paths              [5]
+--------produces shortest-length solution paths      [5]
+--------states are expanded in a proper order        [10]
+----A* [30]
+--------produces correct solution paths              [5]
+--------produces optimal solution paths              [10]
+--------states are expanded in a proper order        [15]
+        (given any heuristic)
+----IDA* [30]
+--------produces correct solution paths              [5]
+--------produces optimal solution paths              [10]
+--------states are expanded in a proper order        [15]
+        (given any heuristic)
+----admissible [20]
+--------admissible                                   [10]
+--------number of expanded nodes when used with A*   [10]
+        (see assignment handout for details)
+Written [60]
+----admissible description                           [20]
+----inadmissible description                         [20]
+----table/summary                                    [20]
+
+Total [180]

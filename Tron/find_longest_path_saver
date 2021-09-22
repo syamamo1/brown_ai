@@ -1,0 +1,46 @@
+    def find_longest_path(self, tronprob, state, player, board, loc):
+        player_to_move = 0
+        for row in board:
+            print("starting board", row)
+        longest_path = None
+        paths_and_states = []
+        initial_moves = list(TronProblem.get_safe_actions(board, loc))
+        for initial_move in initial_moves:
+            paths_and_states.append(([initial_move], tronprob.transition(state, initial_move)))
+        print("initial moves", initial_moves)
+        finished_paths = []
+        while len(paths_and_states) != 0:  # if there are more paths to evaluate
+            this_path = paths_and_states[0][0]
+            this_state = paths_and_states[0][1]
+            this_board = this_state.board
+            this_loc = this_state.player_locs[player]
+            paths_and_states = paths_and_states[1:]
+            for row in this_board:
+                print("this board", row)
+            print("current path to this board", this_path)
+            print("safe actions for this board:", list(TronProblem.get_safe_actions(this_board, this_loc)))
+            if player_to_move % 2 == 0:
+                if len(list(TronProblem.get_safe_actions(this_board, this_loc))) != 0:  # if it is not terminal state
+                    print("this path", this_path, "safe actions", list(TronProblem.get_safe_actions(this_board, this_loc)))
+                    for move in list(TronProblem.get_safe_actions(this_board, this_loc)):
+                        print("Moving...:", move)
+                        new_state = tronprob.transition(this_state, move)
+                        for row in new_state.board:
+                            print("New board:", row)
+                        print("transitioned")
+                        new_path = this_path + [move]
+                        print("completed new path construction. New path:", new_path)
+                        paths_and_states.append((new_path, new_state))
+                        print("added to paths and states")
+                else:  # remove path from paths and add to finished paths
+                    finished_paths = finished_paths + this_path
+            else:
+
+        # if no more paths to eval, return longest path
+        longest_length = 0
+        for path in finished_paths:
+            if longest_length < len(path):
+                longest_path = path
+                longest_length = len(path)
+        TronProblem.longest_path = longest_path
+        return longest_path[0]
